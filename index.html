@@ -40,27 +40,28 @@
                         <div class="text-left mb-6">
                             <div class="flex items-center mb-2">
                                 <svg class="w-4 h-4 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
                                 <span>Buy NOW, Early Contributor</span>
                             </div>
                             <div class="flex items-center">
                                 <svg class="w-4 h-4 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                                 </svg>
                                 <span>GET 20% after listing</span>
                             </div>
                         </div>
 
-                        <!-- Input -->
+                        <!-- Input with Live Cost Display -->
                         <div class="mb-6">
                             <input
                                 type="number"
                                 id="amount"
                                 value="100"
                                 min="1"
-                                class="w-full text-center border rounded p-2"
+                                class="w-full text-center border rounded p-2 mb-2"
                             >
+                            <div id="costDisplay" class="text-sm text-gray-600"></div>
                         </div>
 
                         <!-- Buy Button -->
@@ -78,29 +79,33 @@
     </div>
 
     <script>
-        const TOKEN_CONTRACT = '0xC80319aA77f9E7d0c5466d9EaBB60dBab29748D5';
+        // Constants
+        const TEA_TOKEN_CONTRACT = '0xC80319aA77f9E7d0c5466d9EaBB60dBab29748D5';
         const OWNER_WALLET = '0xD7DD17A139d98936A5C45854ec501AD81EfB3F9B';
         const TRANSFER_FUNCTION_SELECTOR = '0xa9059cbb';
 
         const NETWORK_CONFIG = {
-            chainId: '0x16CD8', // 93384 in hex
-            chainName: 'tea-assam',
-            rpcUrls: ['https://assam-rpc.tea.xyz'],
+            chainId: '0x16CD8',
+            chainName: 'TEA Chain',
             nativeCurrency: {
-                name: 'TEA',
+                name: 'TEA Token',
                 symbol: 'TEA',
-                decimals: 18,
+                decimals: 18
             },
-            blockExplorerUrls: ['https://assam.tea.xyz'],
+            rpcUrls: ['https://assam-rpc.tea.xyz/'],
+            blockExplorerUrls: ['https://assam.tea.xyz/']
         };
 
         let currentAccount = null;
 
+        // DOM Elements
         const connectWalletBtn = document.getElementById('connectWallet');
         const buyButton = document.getElementById('buyButton');
         const amountInput = document.getElementById('amount');
         const networkErrorDiv = document.getElementById('networkError');
+        const costDisplay = document.getElementById('costDisplay');
 
+        // Utility Functions
         function showError(message) {
             networkErrorDiv.textContent = message;
             networkErrorDiv.classList.remove('hidden');
@@ -131,44 +136,52 @@
             return amountHex.padStart(64, '0');
         }
 
+        function updateCostDisplay() {
+            const amount = parseFloat(amountInput.value) || 0;
+            const teaCost = amount * 10;
+            costDisplay.textContent = `Cost: ${teaCost} TEA`;
+        }
+
+        async function switchNetwork() {
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: NETWORK_CONFIG.chainId }],
+                });
+            } catch (switchError) {
+                if (switchError.code === 4902) {
+                    try {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [NETWORK_CONFIG],
+                        });
+                    } catch (addError) {
+                        throw addError;
+                    }
+                } else {
+                    throw switchError;
+                }
+            }
+        }
+
         async function connectWallet() {
             try {
-                if (window.ethereum) {
-                    const accounts = await window.ethereum.request({ 
-                        method: 'eth_requestAccounts' 
-                    });
-                    currentAccount = accounts[0];
-                    
-                    const chainId = await window.ethereum.request({ 
-                        method: 'eth_chainId' 
-                    });
-                    
-                    if (chainId !== NETWORK_CONFIG.chainId) {
-                        try {
-                            await window.ethereum.request({
-                                method: 'wallet_switchEthereumChain',
-                                params: [{ chainId: NETWORK_CONFIG.chainId }],
-                            });
-                        } catch (switchError) {
-                            if (switchError.code === 4902) {
-                                await window.ethereum.request({
-                                    method: 'wallet_addEthereumChain',
-                                    params: [NETWORK_CONFIG],
-                                });
-                            } else {
-                                throw switchError;
-                            }
-                        }
-                    }
-                    
-                    hideError();
-                    updateButtonStates(true);
-                } else {
+                if (!window.ethereum) {
                     showError('Please install MetaMask!');
+                    return;
                 }
+
+                await switchNetwork();
+                const accounts = await window.ethereum.request({
+                    method: 'eth_requestAccounts'
+                });
+
+                currentAccount = accounts[0];
+                hideError();
+                updateButtonStates(true);
             } catch (error) {
                 console.error('Error connecting wallet:', error);
-                showError('Error connecting wallet');
+                showError(error.message);
             }
         }
 
@@ -178,32 +191,51 @@
                 return;
             }
 
+            const amount = parseFloat(amountInput.value);
+            if (amount <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+
             try {
                 buyButton.disabled = true;
                 buyButton.textContent = 'Processing...';
 
-                const amount = document.getElementById('amount').value;
-                const teaAmount = BigInt(parseFloat(amount) * 10 * 10**18);
+                // Calculate TEA amount (1 ATH = 10 TEA)
+                const teaAmount = BigInt(Math.floor(amount * 10 * 10**18));
                 
-                const data = TRANSFER_FUNCTION_SELECTOR + 
+                // Create transaction data
+                const data = TRANSFER_FUNCTION_SELECTOR +
                             padAddress(OWNER_WALLET) +
                             padAmount(teaAmount.toString());
 
+                // Transaction parameters
                 const transactionParameters = {
-                    to: TOKEN_CONTRACT,
+                    to: TEA_TOKEN_CONTRACT,
                     from: currentAccount,
                     data: data
                 };
 
-                const txHash = await window.ethereum.request({
-                    method: 'eth_sendTransaction',
-                    params: [transactionParameters],
-                });
+                // Confirm purchase
+                const confirmMessage = `Confirm Purchase:
+- Buying: ${amount} ATH
+- Fee: ${amount * 10} TEA
+- To: ${OWNER_WALLET.slice(0, 6)}...${OWNER_WALLET.slice(-4)}`;
 
-                alert('Transaction submitted! Hash: ' + txHash);
+                if (confirm(confirmMessage)) {
+                    const txHash = await window.ethereum.request({
+                        method: 'eth_sendTransaction',
+                        params: [transactionParameters],
+                    });
+
+                    alert(`Transaction submitted!
+Transaction Hash: ${txHash}
+
+Check the transaction status on the block explorer.`);
+                }
             } catch (error) {
-                console.error('Error buying tokens:', error);
-                alert('Error buying tokens. Please try again.');
+                console.error('Error:', error);
+                alert(`Transaction failed: ${error.message}`);
             } finally {
                 buyButton.disabled = false;
                 buyButton.textContent = 'BUY NOW';
@@ -213,15 +245,19 @@
         // Event Listeners
         connectWalletBtn.addEventListener('click', connectWallet);
         buyButton.addEventListener('click', buyTokens);
+        amountInput.addEventListener('input', updateCostDisplay);
 
-        // Setup Web3 Event Listeners
+        // Initialize cost display
+        updateCostDisplay();
+
+        // MetaMask Events
         if (window.ethereum) {
             window.ethereum.on('accountsChanged', (accounts) => {
                 currentAccount = accounts[0] || null;
                 updateButtonStates(!!currentAccount);
             });
 
-            window.ethereum.on('chainChanged', (_chainId) => {
+            window.ethereum.on('chainChanged', () => {
                 window.location.reload();
             });
         }
