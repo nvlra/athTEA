@@ -83,7 +83,19 @@
         const TEA_TOKEN_CONTRACT = '0xC80319aA77f9E7d0c5466d9EaBB60dBab29748D5';
         const OWNER_WALLET = '0xD7DD17A139d98936A5C45854ec501AD81EfB3F9B';
         const TRANSFER_FUNCTION_SELECTOR = '0xa9059cbb';
-        const CHAIN_ID = '0x16CD8'; // 93384 in hex
+        const CHAIN_ID = '0x16cd8';
+
+        const NETWORK_CONFIG = {
+            chainId: CHAIN_ID,
+            chainName: 'tea-assam',
+            nativeCurrency: {
+                name: 'TEA',
+                symbol: 'TEA',
+                decimals: 18
+            },
+            rpcUrls: ['https://assam-rpc.tea.xyz'],
+            blockExplorerUrls: ['https://assam.tea.xyz']
+        };
 
         let currentAccount = null;
 
@@ -131,16 +143,27 @@
             costDisplay.textContent = `Cost: ${teaCost} TEA`;
         }
 
-        async function switchNetwork() {
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: CHAIN_ID }],
-                });
-            } catch (error) {
-                console.error('Error switching network:', error);
-                showError('Please make sure you are connected to TEA network');
-                throw error;
+        async function checkAndSwitchNetwork() {
+            const chainId = await window.ethereum.request({ 
+                method: 'eth_chainId' 
+            });
+
+            if (chainId.toLowerCase() !== CHAIN_ID.toLowerCase()) {
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: CHAIN_ID }]
+                    });
+                } catch (error) {
+                    if (error.code === 4902) {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [NETWORK_CONFIG]
+                        });
+                    } else {
+                        throw error;
+                    }
+                }
             }
         }
 
@@ -151,21 +174,13 @@
                     return;
                 }
 
-                // Request account access first
                 const accounts = await window.ethereum.request({
                     method: 'eth_requestAccounts'
                 });
                 currentAccount = accounts[0];
 
-                // Check and switch network if needed
-                const chainId = await window.ethereum.request({ 
-                    method: 'eth_chainId' 
-                });
+                await checkAndSwitchNetwork();
                 
-                if (chainId !== CHAIN_ID) {
-                    await switchNetwork();
-                }
-
                 hideError();
                 updateButtonStates(true);
             } catch (error) {
